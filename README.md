@@ -19,7 +19,6 @@ login a machine already has. A new machine needs the extension and nothing else.
 - [Install](#install)
 - [Setup](#setup)
   - [Messages: a Redis database](#messages-a-redis-database)
-    - [With Upstash Redis](#with-upstash-redis)
   - [Notes: an Upstash Vector index](#notes-an-upstash-vector-index)
 - [Use with Claude](#use-with-claude)
 - [Usage](#usage)
@@ -64,9 +63,8 @@ Valkey server on your own network, and put its URL in `AGENT_MSG_URL`.
 gh variable set AGENT_MSG_URL -R owner/comms --body 'rediss://default:<password>@<host>:6379'
 ```
 
-#### With Upstash Redis
-
 Upstash runs Redis as a hosted service with a free plan, so no machine has to stay on to host it.
+To use it:
 
 1. Sign in to the [Upstash Console](https://console.upstash.com). On the **Redis** tab, click
    **+ Create Database**, give it a name, pick the region closest to your machines, and choose the
