@@ -1,0 +1,16 @@
+[package]
+name = "gh-agent-msg"
+version = "0.0.0"
+edition = "2024"
+description = "GitHub CLI extension for messages between coding agents on several machines, over Redis streams"
+license = "MIT"
+repository = "https://github.com/arriba-tools/gh-agent-msg"
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+redis = { version = "1.8.1", default-features = false, features = ["streams", "tls-rustls", "tls-rustls-webpki-roots"] }
+# The one crypto provider for the TLS that redis uses, ring for building on musl.
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }
+
+[target."cfg(unix)".dependencies]
+libc = "0.2.191"
