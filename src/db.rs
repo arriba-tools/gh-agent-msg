@@ -185,22 +185,27 @@ fn reply(value: redis::Value) -> Reply {
     }
 }
 
-/// The database for this run, and the repository whose variable named it. The URL comes from the
-/// environment variable AGENT_MSG_URL, or else from the Actions variable of that name of `repo`,
-/// by default the repository gh resolves here.
+/// The database for this run, and the repository whose variable named it.
 pub fn connect(repo: Option<&str>) -> Result<(Redis, Option<String>), Stop> {
-    let (value, repo) = match std::env::var(URL_VAR) {
-        Ok(v) if !v.trim().is_empty() => (v, repo.map(str::to_string)),
-        _ => {
-            let repo = resolve(repo)?;
-            (variable(&repo)?, Some(repo))
-        }
-    };
+    let (value, repo) = setting(URL_VAR, repo)?;
     Ok((Redis::open(&redis_url(value.trim())?)?, repo))
 }
 
+/// The value of the setting `name`, and the repository it came from. It is the environment
+/// variable `name`, or else the Actions variable `name` of `repo`, by default the repository gh
+/// resolves here.
+pub fn setting(name: &str, repo: Option<&str>) -> Result<(String, Option<String>), Stop> {
+    match std::env::var(name) {
+        Ok(v) if !v.trim().is_empty() => Ok((v, repo.map(str::to_string))),
+        _ => {
+            let repo = resolve(name, repo)?;
+            Ok((variable(name, &repo)?, Some(repo)))
+        }
+    }
+}
+
 /// `repo`, or the repository gh resolves for the working directory.
-fn resolve(repo: Option<&str>) -> Result<String, Stop> {
+fn resolve(name: &str, repo: Option<&str>) -> Result<String, Stop> {
     match repo {
         Some(r) => Ok(r.to_string()),
         None => gh(&[
@@ -213,22 +218,22 @@ fn resolve(repo: Option<&str>) -> Result<String, Stop> {
         ])
         .map_err(|e| {
             Stop::Failed(format!(
-                "No repository to read {URL_VAR} from, so pass -R OWNER/REPO: {e}"
+                "No repository to read {name} from, so pass -R OWNER/REPO: {e}"
             ))
         }),
     }
 }
 
-fn variable(repo: &str) -> Result<String, Stop> {
+fn variable(name: &str, repo: &str) -> Result<String, Stop> {
     gh(&[
         "api",
-        &format!("repos/{repo}/actions/variables/{URL_VAR}"),
+        &format!("repos/{repo}/actions/variables/{name}"),
         "--jq",
         ".value",
     ])
     .map_err(|e| {
         Stop::Failed(format!(
-            "Reading the Actions variable {URL_VAR} of {repo} failed: {e}"
+            "Reading the Actions variable {name} of {repo} failed: {e}"
         ))
     })
 }
@@ -256,11 +261,7 @@ pub fn redis_url(value: &str) -> Result<String, Stop> {
         .or_else(|| value.strip_prefix("http://"))
         .and_then(|rest| rest.split(['/', '?', ':']).next())
         .filter(|h| !h.is_empty());
-    let token = value
-        .split_once("_token=")
-        .map(|(_, t)| t.split('&').next().unwrap_or_default())
-        .filter(|t| !t.is_empty());
-    match (host, token) {
+    match (host, token(value)) {
         (Some(host), Some(token)) => Ok(format!("rediss://default:{}@{host}:6379", encode(token))),
         _ => Err(Stop::Failed(format!(
             "{URL_VAR} is neither a redis:// URL nor an Upstash REST URL with a _token"
@@ -268,8 +269,16 @@ pub fn redis_url(value: &str) -> Result<String, Stop> {
     }
 }
 
-/// `s` with every byte but the unreserved ones percent-encoded, as a URL's password must be.
-fn encode(s: &str) -> String {
+/// The token an Upstash REST URL carries as its _token parameter, as written.
+pub fn token(url: &str) -> Option<&str> {
+    url.split_once("_token=")
+        .map(|(_, t)| t.split('&').next().unwrap_or_default())
+        .filter(|t| !t.is_empty())
+}
+
+/// `s` with every byte but the unreserved ones percent-encoded, as a URL's password or path
+/// segment must be.
+pub fn encode(s: &str) -> String {
     s.bytes()
         .map(|b| {
             if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
