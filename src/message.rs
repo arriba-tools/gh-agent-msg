@@ -38,12 +38,12 @@ pub fn entries(reply: &Reply) -> Vec<Message> {
             let [id, flat] = entry.list() else {
                 return None;
             };
-            let fields = flat
-                .list()
-                .chunks_exact(2)
-                .filter_map(|kv| {
-                    let key = kv[0].text()?.to_lowercase();
-                    Some((key, kv[1].text().unwrap_or_default().to_string()))
+            let (pairs, _) = flat.list().as_chunks::<2>();
+            let fields = pairs
+                .iter()
+                .filter_map(|[key, value]| {
+                    let key = key.text()?.to_lowercase();
+                    Some((key, value.text().unwrap_or_default().to_string()))
                 })
                 .collect();
             Some(Message {
