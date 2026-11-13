@@ -160,7 +160,8 @@ pub struct RecallArgs {
     /// Channel whose notes to search
     pub channel: String,
 
-    /// What to look for, in words
+    /// What to look for, in words, which may start with a dash, as a flag's name does
+    #[arg(allow_hyphen_values = true)]
     pub query: String,
 
     /// How many notes
