@@ -6,7 +6,8 @@
 
 A GitHub CLI extension for messages between coding agents on several machines, kept in a Redis
 database. Each channel is a Redis stream, and each agent reads it through a consumer group of its
-own, so a message waits for its reader until the reader acknowledges it.
+own, so a message waits for its reader until the reader acknowledges it. Agents can also keep notes
+in an Upstash Vector index, and search them by meaning and by keyword together.
 
 The database's URL lives in an Actions variable of a repository, which `gh` reads with the login a
 machine already has. A new machine needs the extension and nothing else.
@@ -16,12 +17,14 @@ machine already has. A new machine needs the extension and nothing else.
 - [Install](#install)
 - [Setup](#setup)
   - [With Upstash](#with-upstash)
+  - [Notes index](#notes-index)
 - [Use with Claude](#use-with-claude)
 - [Usage](#usage)
   - [Send](#send)
   - [Watch](#watch)
   - [Open asks and missing replies](#open-asks-and-missing-replies)
   - [Log](#log)
+  - [Remember and recall](#remember-and-recall)
 - [Messages](#messages)
 - [Exit statuses](#exit-statuses)
 - [Development](#development)
@@ -77,6 +80,29 @@ watch spends one command for each 59 seconds it waits, and a few for each messag
 An Upstash REST URL, `https://<endpoint>?_token=<token>`, works in the variable as well. It is turned
 into the TLS URL of the same database on port 6379, with the token encoded.
 
+### Notes index
+
+`remember` and `recall` use an Upstash Vector index that embeds text itself, named by the Actions
+variable `AGENT_VECTOR_URL`. The messages don't need it.
+
+1. In the [Upstash Console](https://console.upstash.com), on the **Vector** tab, click
+   **Create Index**. Pick the same region as the database, and the type **Hybrid**, with a hosted
+   embedding model for the dense part and **BM25** for the sparse part.
+2. From the index's **Connect** section, copy `UPSTASH_VECTOR_REST_URL` and
+   `UPSTASH_VECTOR_REST_TOKEN`. Take the token itself, not the read-only one, since `remember`
+   writes.
+3. Store them in the variable as one URL, with the token as `_token`.
+
+   ```
+   gh variable set AGENT_VECTOR_URL -R owner/comms --body 'https://<endpoint>?_token=<token>'
+   ```
+
+4. Check that a machine reaches it. A new index has no notes.
+
+   ```
+   gh agent-msg -R owner/comms recall my-project test
+   ```
+
 ## Use with Claude
 
 Add a line like this to `~/.claude/CLAUDE.md`, naming your repository:
@@ -97,6 +123,8 @@ gh agent-msg [-R OWNER/REPO] <command>
 | `watch <NAME> <CHANNEL>` | Wait for messages to a name and print them, or with `--re` for the replies to messages |
 | `open` | List the asks that wait on someone and the messages with missing replies, or `--wait` on one |
 | `log <CHANNEL>` | Print a channel's latest messages, newest first |
+| `remember <NAME> <CHANNEL>` | Store a note from a `--file` or `--text` in the channel's index, and print its ID |
+| `recall <CHANNEL> <QUERY>` | Print the channel's notes that best match, by meaning and by keyword |
 
 A name is a session's name, such as `coordinator` or `win2`. A channel is usually named after the
 project the agents work on.
@@ -148,6 +176,18 @@ person has answered. A message with `ack-required` is open while one of its name
 gh agent-msg -R owner/comms log my-project --count 20
 ```
 
+### Remember and recall
+
+```
+gh agent-msg -R owner/comms remember linux my-project --text "Fits cross at D 236.6"
+gh agent-msg -R owner/comms recall my-project "where do the fits cross" --count 5
+```
+
+Each channel is a namespace of the index. A note's ID is the milliseconds since 1970, the name that
+stored it, and the ID of the process that stored it. `recall` prints each note as a header, a blank line, then its text, best match
+first. A hybrid index ranks by meaning and by the words themselves, so an exact figure such as
+`D 236.6` still finds its note.
+
 ## Messages
 
 A message is an entry in the stream `chan:<channel>`, with an ID such as `1794536187224-0`, the
@@ -182,14 +222,14 @@ channel keeps about its last 100,000 messages.
 | Status | Meaning |
 |--------|---------|
 | 0 | It printed the messages, or `open` found nothing open |
-| 1 | `open` found something open, or the database refused a command |
+| 1 | `open` found something open, or the database or the index refused a request |
 | 2 | The command line was wrong |
 | 3 | Nothing arrived before `--timeout` |
-| 4 | The database stayed out of reach, for `--offline` minutes in a watch |
+| 4 | The database or the index could not be reached, after `--offline` minutes of retries in a watch |
 
 A watch rides out an outage with a pause that doubles from 15 seconds up to 5 minutes. A send does
 not retry, so after a 4 check `log` before sending again, since the message may have landed with
-only its answer lost.
+only its answer lost. `remember` and `recall` do not retry either.
 
 ## Development
 
