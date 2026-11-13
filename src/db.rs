@@ -308,13 +308,23 @@ impl Deadline {
 /// up to 5 minutes. An outage that outlasts it, or is still on at `deadline`, stops the run as
 /// unreachable, since a wait out of reach cannot say that nothing arrived.
 pub struct Patient<'a> {
-    pub db: &'a mut dyn Db,
-    pub offline: Duration,
-    pub deadline: Instant,
-    pub sleep: &'a mut dyn FnMut(Duration),
+    db: &'a mut dyn Db,
+    offline: Duration,
+    deadline: Instant,
+    /// Waits out a pause, on the system clock outside tests.
+    sleep: Box<dyn FnMut(Duration) + 'a>,
 }
 
-impl Patient<'_> {
+impl<'a> Patient<'a> {
+    pub fn new(db: &'a mut dyn Db, offline: Duration, deadline: Instant) -> Self {
+        Self {
+            db,
+            offline,
+            deadline,
+            sleep: Box::new(std::thread::sleep),
+        }
+    }
+
     pub fn call(&mut self, args: &[String], err: &mut dyn Write) -> Result<Reply, Stop> {
         let mut since: Option<Instant> = None;
         let mut pause = Duration::from_secs(15);
@@ -395,15 +405,13 @@ mod tests {
     fn an_outage_is_ridden_out_with_a_doubling_pause() {
         let mut db = Flaky { fails: 3 };
         let mut pauses = Vec::new();
-        let mut sleep = |d: Duration| pauses.push(d.as_secs());
         let mut err = Vec::new();
-        let reply = Patient {
-            db: &mut db,
-            offline: Duration::from_secs(15 * 60),
-            deadline: Instant::now() + Duration::from_secs(3600),
-            sleep: &mut sleep,
-        }
-        .call(&cmd!["PING"], &mut err);
+        let reply = {
+            let hour = Instant::now() + Duration::from_secs(3600);
+            let mut run = Patient::new(&mut db, Duration::from_secs(15 * 60), hour);
+            run.sleep = Box::new(|d: Duration| pauses.push(d.as_secs()));
+            run.call(&cmd!["PING"], &mut err)
+        };
         assert_eq!(reply, Ok(Reply::Text("OK".into())));
         assert_eq!(pauses, [15, 30, 60]);
         // The outage is reported once.
@@ -412,16 +420,12 @@ mod tests {
 
     #[test]
     fn an_outage_past_offline_or_the_deadline_is_unreachable() {
-        let mut sleep = |_: Duration| {};
         for (offline, deadline) in [(0, 3600), (900, 10)] {
             let mut db = Flaky { fails: 100 };
-            let reply = Patient {
-                db: &mut db,
-                offline: Duration::from_secs(offline),
-                deadline: Instant::now() + Duration::from_secs(deadline),
-                sleep: &mut sleep,
-            }
-            .call(&cmd!["PING"], &mut Vec::new());
+            let deadline = Instant::now() + Duration::from_secs(deadline);
+            let mut run = Patient::new(&mut db, Duration::from_secs(offline), deadline);
+            run.sleep = Box::new(|_| {});
+            let reply = run.call(&cmd!["PING"], &mut Vec::new());
             assert!(matches!(reply, Err(Stop::Unreachable(_))));
         }
     }

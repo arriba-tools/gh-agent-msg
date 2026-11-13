@@ -19,13 +19,7 @@ fn hold(deadline: &mut Deadline, timeout: u64) -> Result<Vec<String>, Stop> {
 
 pub fn watch(db: &mut dyn Db, a: &WatchArgs, repo: Option<&str>, io: &mut Io) -> Result<i32, Stop> {
     let mut deadline = Deadline::after(a.timeout);
-    let mut sleep = std::thread::sleep;
-    let mut run = Patient {
-        db,
-        offline: Duration::from_secs(a.offline * 60),
-        deadline: deadline.at(),
-        sleep: &mut sleep,
-    };
+    let mut run = Patient::new(db, Duration::from_secs(a.offline * 60), deadline.at());
     let stream = format!("{PREFIX}{}", a.channel);
     if !a.re.is_empty() {
         return replies(&mut run, &stream, a, &mut deadline, io);
