@@ -1,6 +1,7 @@
 //! Messages as stream entries, and the commands that send and list them.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::cli::{LogArgs, SendArgs};
@@ -126,12 +127,17 @@ pub fn now_ms() -> u64 {
         .map_or(0, |d| d.as_millis() as u64)
 }
 
+/// The text of a --file, or else of a --text.
+pub fn text(file: Option<&Path>, text: Option<&str>) -> Result<String, Stop> {
+    match file {
+        Some(path) => std::fs::read_to_string(path)
+            .map_err(|e| Stop::Failed(format!("Failed to read {}: {e}", path.display()))),
+        None => Ok(text.unwrap_or_default().to_string()),
+    }
+}
+
 pub fn send(db: &mut dyn Db, a: &SendArgs, io: &mut Io) -> Result<i32, Stop> {
-    let body = match (&a.file, &a.text) {
-        (Some(path), _) => std::fs::read_to_string(path)
-            .map_err(|e| Stop::Failed(format!("Failed to read {}: {e}", path.display())))?,
-        (None, text) => text.clone().unwrap_or_default(),
-    };
+    let body = text(a.file.as_deref(), a.text.as_deref())?;
     let id = db.call(&cmd![
         "XADD",
         format!("{PREFIX}{}", a.channel),
