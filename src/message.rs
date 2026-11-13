@@ -129,7 +129,7 @@ pub fn now_ms() -> u64 {
 pub fn send(db: &mut dyn Db, a: &SendArgs, io: &mut Io) -> Result<i32, Stop> {
     let body = match (&a.file, &a.text) {
         (Some(path), _) => std::fs::read_to_string(path)
-            .map_err(|e| Stop::Refused(format!("Failed to read {}: {e}", path.display())))?,
+            .map_err(|e| Stop::Failed(format!("Failed to read {}: {e}", path.display())))?,
         (None, text) => text.clone().unwrap_or_default(),
     };
     let id = db.call(&cmd![
