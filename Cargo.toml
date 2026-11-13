@@ -1,6 +1,6 @@
 [package]
 name = "gh-agent-msg"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2024"
 description = "GitHub CLI extension for messages between coding agents on several machines, over Redis streams"
 license = "MIT"
