@@ -38,8 +38,8 @@ pub(crate) use say;
 /// Why a run stopped short.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Stop {
-    /// The database refused a command, or none could be sent. Exit status 1.
-    Refused(String),
+    /// The database refused a command, or the run failed before sending one. Exit status 1.
+    Failed(String),
     /// Nothing arrived before the timeout. Exit status 3.
     TimedOut(String),
     /// The database stayed out of reach. Exit status 4.
@@ -49,7 +49,7 @@ pub enum Stop {
 impl Stop {
     pub fn code(&self) -> i32 {
         match self {
-            Stop::Refused(_) => 1,
+            Stop::Failed(_) => 1,
             Stop::TimedOut(_) => 3,
             Stop::Unreachable(_) => 4,
         }
@@ -59,7 +59,7 @@ impl Stop {
 impl fmt::Display for Stop {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Stop::Refused(m) | Stop::TimedOut(m) | Stop::Unreachable(m) => f.write_str(m),
+            Stop::Failed(m) | Stop::TimedOut(m) | Stop::Unreachable(m) => f.write_str(m),
         }
     }
 }
@@ -104,7 +104,7 @@ pub struct Redis {
 impl Redis {
     pub fn open(url: &str) -> Result<Self, Stop> {
         let unusable = |e: redis::RedisError| {
-            Stop::Refused(format!("{URL_VAR} is not a usable Redis URL: {e}"))
+            Stop::Failed(format!("{URL_VAR} is not a usable Redis URL: {e}"))
         };
         let info = url.into_connection_info().map_err(unusable)?;
         // Without the client name sent behind AUTH, a server that answers a wrong password and
@@ -148,7 +148,7 @@ fn failure(command: &str, e: redis::RedisError) -> Stop {
     if unreachable(&e) {
         Stop::Unreachable(format!("Redis failed {command}: {e}"))
     } else {
-        Stop::Refused(format!("Redis refused {command}: {e}"))
+        Stop::Failed(format!("Redis refused {command}: {e}"))
     }
 }
 
@@ -157,7 +157,7 @@ fn connecting(e: redis::RedisError) -> Stop {
     if unreachable(&e) {
         Stop::Unreachable(format!("Could not connect to Redis: {e}"))
     } else {
-        Stop::Refused(format!("Redis refused the connection: {e}"))
+        Stop::Failed(format!("Redis refused the connection: {e}"))
     }
 }
 
@@ -212,7 +212,7 @@ fn resolve(repo: Option<&str>) -> Result<String, Stop> {
             ".nameWithOwner",
         ])
         .map_err(|e| {
-            Stop::Refused(format!(
+            Stop::Failed(format!(
                 "No repository to read {URL_VAR} from, so pass -R OWNER/REPO: {e}"
             ))
         }),
@@ -227,7 +227,7 @@ fn variable(repo: &str) -> Result<String, Stop> {
         ".value",
     ])
     .map_err(|e| {
-        Stop::Refused(format!(
+        Stop::Failed(format!(
             "Reading the Actions variable {URL_VAR} of {repo} failed: {e}"
         ))
     })
@@ -262,7 +262,7 @@ pub fn redis_url(value: &str) -> Result<String, Stop> {
         .filter(|t| !t.is_empty());
     match (host, token) {
         (Some(host), Some(token)) => Ok(format!("rediss://default:{}@{host}:6379", encode(token))),
-        _ => Err(Stop::Refused(format!(
+        _ => Err(Stop::Failed(format!(
             "{URL_VAR} is neither a redis:// URL nor an Upstash REST URL with a _token"
         ))),
     }
@@ -390,7 +390,7 @@ mod tests {
             "ftp://db?_token=t",
             "https://?_token=t",
         ] {
-            assert!(matches!(redis_url(bad), Err(Stop::Refused(_))), "{bad}");
+            assert!(matches!(redis_url(bad), Err(Stop::Failed(_))), "{bad}");
         }
     }
 

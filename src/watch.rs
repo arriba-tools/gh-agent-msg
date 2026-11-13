@@ -31,7 +31,7 @@ pub fn watch(db: &mut dyn Db, a: &WatchArgs, repo: Option<&str>, io: &mut Io) ->
         &cmd!["XGROUP", "CREATE", stream, a.name, start, "MKSTREAM"],
         io.err,
     ) {
-        Err(Stop::Refused(e)) if e.contains("BUSYGROUP") => {}
+        Err(Stop::Failed(e)) if e.contains("BUSYGROUP") => {}
         other => {
             other?;
         }
@@ -228,7 +228,7 @@ mod tests {
         let (code, _, err) = invoke(&mut down, &["watch", "mac", "c", "--offline", "0"]);
         assert_eq!(code, 4);
         assert!(err.contains("out of reach"), "{err}");
-        let mut wrong = Fake::failing(crate::db::Stop::Refused(
+        let mut wrong = Fake::failing(crate::db::Stop::Failed(
             "Redis refused XGROUP: WRONGPASS invalid username-password pair".into(),
         ));
         let (code, _, err) = invoke(&mut wrong, &["watch", "mac", "c"]);

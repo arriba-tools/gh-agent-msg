@@ -22,7 +22,7 @@ fn channels(db: &mut dyn Db) -> Result<Vec<String>, Stop> {
             PAGE
         ])?;
         let [next, keys] = reply.list() else {
-            return Err(Stop::Refused("Unexpected reply to SCAN".into()));
+            return Err(Stop::Failed("Unexpected reply to SCAN".into()));
         };
         found.extend(
             keys.list()
@@ -190,14 +190,14 @@ fn wait(
     io: &mut Io,
 ) -> Result<i32, Stop> {
     let Some((chan, id)) = key.split_once('/') else {
-        return Err(Stop::Refused(format!(
+        return Err(Stop::Failed(format!(
             "--wait takes CHANNEL/ID, not {key:?}"
         )));
     };
     let stream = format!("{PREFIX}{chan}");
     let found = entries(&run.call(&cmd!["XRANGE", stream, id, id], io.err)?);
     let Some(message) = found.first() else {
-        return Err(Stop::Refused(format!("No message {key}")));
+        return Err(Stop::Failed(format!("No message {key}")));
     };
     let need = names(message.get("ack-required"));
     let mut replied = BTreeSet::new();

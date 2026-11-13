@@ -109,7 +109,7 @@ impl Db for Fake {
             "XGROUP" => {
                 let key = (a[2].to_string(), a[3].to_string());
                 if self.groups.contains_key(&key) {
-                    return Err(Stop::Refused(
+                    return Err(Stop::Failed(
                         "Redis refused XGROUP: BUSYGROUP Consumer Group name already exists".into(),
                     ));
                 }
@@ -141,7 +141,7 @@ impl Db for Fake {
                     let g = self
                         .groups
                         .get_mut(&(key.to_string(), a[2].to_string()))
-                        .ok_or_else(|| Stop::Refused("Redis refused XREADGROUP: NOGROUP".into()))?;
+                        .ok_or_else(|| Stop::Failed("Redis refused XREADGROUP: NOGROUP".into()))?;
                     if cursor != ">" {
                         let pending = stream.iter().filter(|(id, _)| g.pending.contains(id));
                         return Ok(Reply::List(vec![Reply::List(vec![
@@ -190,7 +190,7 @@ impl Db for Fake {
                     out.into_iter().take(count).map(Self::entry).collect(),
                 ))
             }
-            other => Err(Stop::Refused(format!("Fake has no {other}"))),
+            other => Err(Stop::Failed(format!("Fake has no {other}"))),
         }
     }
 }
