@@ -185,19 +185,24 @@ fn reply(value: redis::Value) -> Reply {
     }
 }
 
-/// The database for this run, from the environment variable AGENT_MSG_URL, or else from the
-/// Actions variable of that name of `repo`, by default the repository gh resolves here.
-pub fn connect(repo: Option<&str>) -> Result<Redis, Stop> {
-    let value = match std::env::var(URL_VAR) {
-        Ok(v) if !v.trim().is_empty() => v,
-        _ => variable(repo)?,
+/// The database for this run, and the repository whose variable named it. The URL comes from the
+/// environment variable AGENT_MSG_URL, or else from the Actions variable of that name of `repo`,
+/// by default the repository gh resolves here.
+pub fn connect(repo: Option<&str>) -> Result<(Redis, Option<String>), Stop> {
+    let (value, repo) = match std::env::var(URL_VAR) {
+        Ok(v) if !v.trim().is_empty() => (v, repo.map(str::to_string)),
+        _ => {
+            let repo = resolve(repo)?;
+            (variable(&repo)?, Some(repo))
+        }
     };
-    Redis::open(&redis_url(value.trim())?)
+    Ok((Redis::open(&redis_url(value.trim())?)?, repo))
 }
 
-fn variable(repo: Option<&str>) -> Result<String, Stop> {
-    let repo = match repo {
-        Some(r) => r.to_string(),
+/// `repo`, or the repository gh resolves for the working directory.
+fn resolve(repo: Option<&str>) -> Result<String, Stop> {
+    match repo {
+        Some(r) => Ok(r.to_string()),
         None => gh(&[
             "repo",
             "view",
@@ -210,8 +215,11 @@ fn variable(repo: Option<&str>) -> Result<String, Stop> {
             Stop::Refused(format!(
                 "No repository to read {URL_VAR} from, so pass -R OWNER/REPO: {e}"
             ))
-        })?,
-    };
+        }),
+    }
+}
+
+fn variable(repo: &str) -> Result<String, Stop> {
     gh(&[
         "api",
         &format!("repos/{repo}/actions/variables/{URL_VAR}"),

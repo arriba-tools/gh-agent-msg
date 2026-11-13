@@ -26,18 +26,19 @@ fn main() {
         err: &mut err,
     };
     let code = match db::connect(cli.repo.as_deref()) {
-        Ok(mut db) => finish(run(&mut db, &cli, &mut io), &mut io),
+        Ok((mut db, repo)) => finish(run(&mut db, &cli, repo.as_deref(), &mut io), &mut io),
         Err(stop) => finish(Err(stop), &mut io),
     };
     let _ = io.out.flush();
     std::process::exit(code);
 }
 
-/// Run the command against `db`, returning the exit status it ends with.
-pub fn run(db: &mut dyn Db, cli: &Cli, io: &mut Io) -> Result<i32, Stop> {
+/// Run the command against `db`, returning the exit status it ends with. `repo` is the
+/// repository whose variable named the database, which a printed restart command names.
+pub fn run(db: &mut dyn Db, cli: &Cli, repo: Option<&str>, io: &mut Io) -> Result<i32, Stop> {
     match &cli.command {
         Command::Send(a) => message::send(db, a, io),
-        Command::Watch(a) => watch::watch(db, a, cli.repo.as_deref(), io),
+        Command::Watch(a) => watch::watch(db, a, repo, io),
         Command::Open(a) => open::open(db, a, io),
         Command::Log(a) => message::log(db, a, io),
     }
@@ -72,7 +73,7 @@ pub mod tests {
                 out: &mut out,
                 err: &mut err,
             };
-            let result = run(db, &cli, &mut io);
+            let result = run(db, &cli, cli.repo.as_deref(), &mut io);
             finish(result, &mut io)
         };
         (
