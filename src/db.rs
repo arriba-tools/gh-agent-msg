@@ -273,6 +273,37 @@ fn encode(s: &str) -> String {
         .collect()
 }
 
+/// When a wait ends, and how long each of its reads may block.
+pub struct Deadline {
+    at: Instant,
+    polled: bool,
+}
+
+impl Deadline {
+    pub fn after(minutes: u64) -> Self {
+        Self {
+            at: Instant::now() + Duration::from_secs(minutes * 60),
+            polled: false,
+        }
+    }
+
+    pub fn at(&self) -> Instant {
+        self.at
+    }
+
+    /// The BLOCK of the next read, at most HOLD seconds and never past the deadline. Past it, a
+    /// first read that does not block, so a zero timeout still looks once, and None after that.
+    pub fn next_read(&mut self) -> Option<Vec<String>> {
+        let left = self.at.saturating_duration_since(Instant::now()).as_secs();
+        let first = !std::mem::replace(&mut self.polled, true);
+        match left {
+            0 if first => Some(Vec::new()),
+            0 => None,
+            _ => Some(cmd!["BLOCK", left.min(HOLD) * 1000]),
+        }
+    }
+}
+
 /// Sends commands, riding out an outage for `offline` with a pause that doubles from 15 seconds
 /// up to 5 minutes. An outage that outlasts it, or is still on at `deadline`, stops the run as
 /// unreachable, since a wait out of reach cannot say that nothing arrived.
@@ -314,6 +345,15 @@ impl Patient<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_deadline_blocks_until_it_passes_then_reads_once() {
+        let mut later = Deadline::after(10);
+        assert_eq!(later.next_read().unwrap(), ["BLOCK", "59000"]);
+        let mut past = Deadline::after(0);
+        assert_eq!(past.next_read().unwrap(), Vec::<String>::new());
+        assert_eq!(past.next_read(), None);
+    }
 
     #[test]
     fn redis_url_takes_a_redis_url_or_an_upstash_rest_url() {

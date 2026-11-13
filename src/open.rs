@@ -2,10 +2,10 @@
 //! replied (`ack-required`).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::cli::OpenArgs;
-use crate::db::{Db, HOLD, Io, PAGE, PREFIX, Patient, Stop, cmd, say};
+use crate::db::{Db, Deadline, Io, PAGE, PREFIX, Patient, Stop, cmd, say};
 use crate::message::{Message, entries, names, now_ms, streamed};
 
 /// Every channel that has a stream.
@@ -136,15 +136,15 @@ fn subject(i: &Item) -> &str {
 
 pub fn open(db: &mut dyn Db, a: &OpenArgs, io: &mut Io) -> Result<i32, Stop> {
     if let Some(key) = &a.wait {
-        let deadline = Instant::now() + Duration::from_secs(a.timeout * 60);
+        let mut deadline = Deadline::after(a.timeout);
         let mut sleep = std::thread::sleep;
         let mut run = Patient {
             db,
             offline: Duration::from_secs(15 * 60),
-            deadline,
+            deadline: deadline.at(),
             sleep: &mut sleep,
         };
-        return wait(&mut run, key, deadline, a.timeout, io);
+        return wait(&mut run, key, &mut deadline, a.timeout, io);
     }
     let chans = if a.channel.is_empty() {
         channels(db)?
@@ -191,7 +191,7 @@ pub fn open(db: &mut dyn Db, a: &OpenArgs, io: &mut Io) -> Result<i32, Stop> {
 fn wait(
     run: &mut Patient,
     key: &str,
-    deadline: Instant,
+    deadline: &mut Deadline,
     timeout: u64,
     io: &mut Io,
 ) -> Result<i32, Stop> {
@@ -209,25 +209,20 @@ fn wait(
     let mut replied = BTreeSet::new();
     let mut last = id.to_string();
     let mut shown: Option<Vec<String>> = None;
-    let mut polled = false;
     loop {
-        let left = deadline.saturating_duration_since(Instant::now()).as_secs();
-        let missing: Vec<String> = need.difference(&replied).cloned().collect();
-        if polled && left == 0 {
+        let Some(block) = deadline.next_read() else {
+            let missing: Vec<String> = need.difference(&replied).cloned().collect();
             say!(
                 io.out,
                 "no reply from {} within {timeout} minutes",
                 missing.join(", ")
             );
             return Ok(3);
-        }
+        };
         let mut read = cmd!["XREAD", "COUNT", PAGE];
-        if left > 0 {
-            read.extend(cmd!["BLOCK", left.min(HOLD) * 1000]);
-        }
+        read.extend(block);
         read.extend(cmd!["STREAMS", stream, last]);
         let got = streamed(&run.call(&read, io.err)?);
-        polled = true;
         for m in &got {
             last = m.id.clone();
             if m.get("re") == id {

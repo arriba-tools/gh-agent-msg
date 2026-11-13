@@ -1,41 +1,34 @@
 //! Waiting on a channel for the messages to a name, or for the replies to messages.
 
 use std::collections::BTreeSet;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::cli::WatchArgs;
-use crate::db::{Db, HOLD, Io, PAGE, PREFIX, Patient, Stop, cmd, say};
+use crate::db::{Db, Deadline, Io, PAGE, PREFIX, Patient, Stop, cmd, say};
 use crate::message::{Message, mine, now_ms, order, show, streamed};
 
 /// How far back a name's first watch looks, in milliseconds.
 const LOOKBACK: u64 = 24 * 60 * 60 * 1000;
 
-/// The BLOCK of the next read, at most HOLD seconds and never past `deadline`. Past it, one read
-/// that does not block when nothing was read yet, so a zero --timeout still looks once, and
-/// otherwise the end of the wait.
-fn hold(deadline: Instant, polled: bool, timeout: u64) -> Result<Vec<String>, Stop> {
-    let left = deadline.saturating_duration_since(Instant::now()).as_secs();
-    if left > 0 {
-        return Ok(cmd!["BLOCK", left.min(HOLD) * 1000]);
-    }
-    if !polled {
-        return Ok(Vec::new());
-    }
-    Err(Stop::TimedOut(format!("Nothing new in {timeout}m")))
+/// The BLOCK of the next read, or the end of the wait once the deadline has passed.
+fn hold(deadline: &mut Deadline, timeout: u64) -> Result<Vec<String>, Stop> {
+    deadline
+        .next_read()
+        .ok_or_else(|| Stop::TimedOut(format!("Nothing new in {timeout}m")))
 }
 
 pub fn watch(db: &mut dyn Db, a: &WatchArgs, repo: Option<&str>, io: &mut Io) -> Result<i32, Stop> {
-    let deadline = Instant::now() + Duration::from_secs(a.timeout * 60);
+    let mut deadline = Deadline::after(a.timeout);
     let mut sleep = std::thread::sleep;
     let mut run = Patient {
         db,
         offline: Duration::from_secs(a.offline * 60),
-        deadline,
+        deadline: deadline.at(),
         sleep: &mut sleep,
     };
     let stream = format!("{PREFIX}{}", a.channel);
     if !a.re.is_empty() {
-        return replies(&mut run, &stream, a, deadline, io);
+        return replies(&mut run, &stream, a, &mut deadline, io);
     }
 
     // A name's group starts a day back, so a name that joins late still sees what was sent to it.
@@ -55,12 +48,10 @@ pub fn watch(db: &mut dyn Db, a: &WatchArgs, repo: Option<&str>, io: &mut Io) ->
 
     // ID 0 reads what this name was given and has not acked, and > what nobody was given yet.
     let mut cursor = "0";
-    let mut polled = false;
     loop {
         let mut read = cmd!["XREADGROUP", "GROUP", a.name, a.name, "COUNT", PAGE];
         if cursor == ">" {
-            read.extend(hold(deadline, polled, a.timeout)?);
-            polled = true;
+            read.extend(hold(&mut deadline, a.timeout)?);
         }
         read.extend(cmd!["STREAMS", stream, cursor]);
         let got = streamed(&run.call(&read, io.err)?);
@@ -107,7 +98,7 @@ fn replies(
     run: &mut Patient,
     stream: &str,
     a: &WatchArgs,
-    deadline: Instant,
+    deadline: &mut Deadline,
     io: &mut Io,
 ) -> Result<i32, Stop> {
     let want: BTreeSet<&str> = a.re.iter().map(String::as_str).collect();
@@ -116,11 +107,9 @@ fn replies(
             .min_by_key(|id| order(id))
             .cloned()
             .unwrap_or_default();
-    let mut polled = false;
     loop {
         let mut read = cmd!["XREAD", "COUNT", PAGE];
-        read.extend(hold(deadline, polled, a.timeout)?);
-        polled = true;
+        read.extend(hold(deadline, a.timeout)?);
         read.extend(cmd!["STREAMS", stream, last]);
         let got = streamed(&run.call(&read, io.err)?);
         if let Some(m) = got.last() {
@@ -143,7 +132,6 @@ fn replies(
 
 #[cfg(test)]
 mod tests {
-    use crate::db::Reply;
     use crate::fake::Fake;
     use crate::tests::invoke;
 
@@ -252,16 +240,5 @@ mod tests {
         let (code, _, err) = invoke(&mut wrong, &["watch", "mac", "c"]);
         assert_eq!(code, 1);
         assert!(err.contains("WRONGPASS"), "{err}");
-    }
-
-    #[test]
-    fn hold_blocks_until_the_deadline_then_looks_once() {
-        use std::time::{Duration, Instant};
-        let later = Instant::now() + Duration::from_secs(600);
-        assert_eq!(super::hold(later, true, 10).unwrap(), ["BLOCK", "59000"]);
-        let past = Instant::now();
-        assert_eq!(super::hold(past, false, 0).unwrap(), Vec::<String>::new());
-        assert!(super::hold(past, true, 0).is_err());
-        let _ = Reply::Nil;
     }
 }
