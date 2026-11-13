@@ -4,20 +4,23 @@
 [![Lint](https://github.com/arriba-tools/gh-agent-msg/actions/workflows/lint.yml/badge.svg)](https://github.com/arriba-tools/gh-agent-msg/actions/workflows/lint.yml)
 [![codecov](https://codecov.io/gh/arriba-tools/gh-agent-msg/graph/badge.svg)](https://codecov.io/gh/arriba-tools/gh-agent-msg)
 
-A GitHub CLI extension for messages between coding agents on several machines, kept in a Redis
-database. Each channel is a Redis stream, and each agent reads it through a consumer group of its
-own, so a message waits for its reader until the reader acknowledges it. Agents can also keep notes
-in an Upstash Vector index, and search them by meaning and by keyword together.
+A GitHub CLI extension for coding agents on several machines. Agents send each other messages
+through a Redis database, and keep notes in an Upstash Vector index, which they search by meaning
+and by keyword together.
 
-The database's URL lives in an Actions variable of a repository, which `gh` reads with the login a
-machine already has. A new machine needs the extension and nothing else.
+Each channel is a Redis stream, and each agent reads it through a consumer group of its own, so a
+message waits for its reader until the reader acknowledges it.
+
+Actions variables of a repository name the database and the index, and `gh` reads them with the
+login a machine already has. A new machine needs the extension and nothing else.
 
 ## Contents
 
 - [Install](#install)
 - [Setup](#setup)
-  - [With Upstash](#with-upstash)
-  - [Notes index](#notes-index)
+  - [Messages: a Redis database](#messages-a-redis-database)
+    - [With Upstash Redis](#with-upstash-redis)
+  - [Notes: an Upstash Vector index](#notes-an-upstash-vector-index)
 - [Use with Claude](#use-with-claude)
 - [Usage](#usage)
   - [Send](#send)
@@ -40,19 +43,28 @@ Upgrade with `gh extension upgrade agent-msg`.
 
 ## Setup
 
-Use any Redis server that every machine reaches, such as the free tier of Upstash, Redis Cloud, or
-a Redis or Valkey server on your own network. Put its URL in the Actions variable `AGENT_MSG_URL`
-of a private repository the machines can read.
+The extension reads two Actions variables of a private repository that every machine can read, so
+every command takes `-R owner/comms`.
+
+| Variable | Names | Read by |
+|----------|-------|---------|
+| `AGENT_MSG_URL` | The Redis database that carries the messages | `send`, `watch`, `open`, `log` |
+| `AGENT_VECTOR_URL` | The Upstash Vector index that keeps the notes | `remember`, `recall` |
+
+Messages need only the database, and notes only the index, so leave `AGENT_VECTOR_URL` unset to go
+without notes. Anyone who can read the repository can read the variables, so keep it private. An
+environment variable of the same name overrides each one.
+
+### Messages: a Redis database
+
+Use any Redis server that every machine reaches, such as Upstash Redis, Redis Cloud, or a Redis or
+Valkey server on your own network, and put its URL in `AGENT_MSG_URL`.
 
 ```
 gh variable set AGENT_MSG_URL -R owner/comms --body 'rediss://default:<password>@<host>:6379'
 ```
 
-Every command then takes `-R owner/comms`. Anyone who can read the repository can read the
-variable, so keep the repository private. The environment variable `AGENT_MSG_URL` overrides the
-repository variable.
-
-### With Upstash
+#### With Upstash Redis
 
 Upstash runs Redis as a hosted service with a free plan, so no machine has to stay on to host it.
 
@@ -62,7 +74,7 @@ Upstash runs Redis as a hosted service with a free plan, so no machine has to st
 2. Open the database's **Details** tab, and copy its **Endpoint**, **Port** and **Token**. The
    token is also the database's password. Copy the token itself, not the read-only one, since a
    watch records what its name has read.
-3. Store the URL in the variable. Write any `/`, `+` or `=` in the token as `%2F`, `%2B` or `%3D`.
+3. Store the URL in `AGENT_MSG_URL`. Write any `/`, `+` or `=` in the token as `%2F`, `%2B` or `%3D`.
 
    ```
    gh variable set AGENT_MSG_URL -R owner/comms --body 'rediss://default:<token>@<endpoint>:<port>'
@@ -77,13 +89,13 @@ Upstash runs Redis as a hosted service with a free plan, so no machine has to st
 The free plan's 500,000 commands a month cover about ten agents watching around the clock, since a
 watch spends one command for each 59 seconds it waits, and a few for each message.
 
-An Upstash REST URL, `https://<endpoint>?_token=<token>`, works in the variable as well. It is turned
-into the TLS URL of the same database on port 6379, with the token encoded.
+An Upstash Redis REST URL, `https://<endpoint>?_token=<token>`, works in `AGENT_MSG_URL` as well.
+It is turned into the TLS URL of the same database on port 6379, with the token encoded.
 
-### Notes index
+### Notes: an Upstash Vector index
 
-`remember` and `recall` use an Upstash Vector index that embeds text itself, named by the Actions
-variable `AGENT_VECTOR_URL`. The messages don't need it.
+`remember` and `recall` need an Upstash Vector index that embeds text itself. Upstash Vector is a
+separate product from Upstash Redis, with its own tab in the console, and its own URL and token.
 
 1. In the [Upstash Console](https://console.upstash.com), on the **Vector** tab, click
    **Create Index**. Pick the same region as the database, and the type **Hybrid**, with a hosted
@@ -91,7 +103,8 @@ variable `AGENT_VECTOR_URL`. The messages don't need it.
 2. From the index's **Connect** section, copy `UPSTASH_VECTOR_REST_URL` and
    `UPSTASH_VECTOR_REST_TOKEN`. Take the token itself, not the read-only one, since `remember`
    writes.
-3. Store them in the variable as one URL, with the token as `_token`.
+3. Store them in `AGENT_VECTOR_URL` as one URL, with the token as `_token`. Unlike the Redis
+   token, this one goes in as copied.
 
    ```
    gh variable set AGENT_VECTOR_URL -R owner/comms --body 'https://<endpoint>?_token=<token>'
