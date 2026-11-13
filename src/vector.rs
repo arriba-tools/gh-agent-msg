@@ -130,6 +130,8 @@ pub fn recall(index: &mut dyn Index, a: &RecallArgs, io: &mut Io) -> Result<i32,
         "topK": a.count,
         "includeMetadata": true,
         "includeData": true,
+        // BM25 weighs each word by its rarity, so a figure outweighs words such as "at" and "D".
+        "weightingStrategy": "IDF",
     });
     let result = index.post(&format!("query-data/{}", db::encode(&a.channel)), &body)?;
     let hits = result.as_array().map(Vec::as_slice).unwrap_or_default();
@@ -220,11 +222,20 @@ mod tests {
             (body["topK"].as_u64(), body["includeData"].as_bool()),
             (Some(2), Some(true))
         );
+        assert_eq!(body["weightingStrategy"], "IDF");
         assert_eq!(
             out,
             "--- 2-win2\nfrom: win2\nscore: 0.0328\n\nfits cross at D 236.6\n\n\
              --- 1-mac\nfrom: mac\nscore: 0.0161\n\nd6 at D 241.13\n\n"
         );
+    }
+
+    #[test]
+    fn recall_takes_a_query_that_starts_with_a_dash() {
+        let mut index = Recorder::answering(Ok(json!([])));
+        let (code, _, _) = invoke_index(&mut index, &["recall", "c", "--a_grow 1.25"]);
+        assert_eq!(code, 0);
+        assert_eq!(index.requests[0].1["data"], "--a_grow 1.25");
     }
 
     #[test]
