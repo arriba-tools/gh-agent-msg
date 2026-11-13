@@ -137,13 +137,7 @@ fn subject(i: &Item) -> &str {
 pub fn open(db: &mut dyn Db, a: &OpenArgs, io: &mut Io) -> Result<i32, Stop> {
     if let Some(key) = &a.wait {
         let mut deadline = Deadline::after(a.timeout);
-        let mut sleep = std::thread::sleep;
-        let mut run = Patient {
-            db,
-            offline: Duration::from_secs(15 * 60),
-            deadline: deadline.at(),
-            sleep: &mut sleep,
-        };
+        let mut run = Patient::new(db, Duration::from_secs(15 * 60), deadline.at());
         return wait(&mut run, key, &mut deadline, a.timeout, io);
     }
     let chans = if a.channel.is_empty() {
