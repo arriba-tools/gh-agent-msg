@@ -69,11 +69,13 @@ pub struct SendArgs {
     #[arg(long, value_name = "ID", value_parser = entry_id)]
     pub re: Option<String>,
 
-    /// The person the message waits on
+    /// The person the message waits on. `open` lists it until you, its sender, reply to it with
+    /// --re once they have answered
     #[arg(long, value_name = "NAME")]
     pub needs: Option<String>,
 
-    /// Recipients who must each reply, separated by commas
+    /// Recipients who must each reply with --re, separated by commas. `open` lists it until all of
+    /// them have
     #[arg(long, value_name = "NAMES")]
     pub ack_required: Option<String>,
 }
