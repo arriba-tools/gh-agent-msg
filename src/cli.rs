@@ -153,6 +153,11 @@ pub struct RememberArgs {
     /// The note itself
     #[arg(long)]
     pub text: Option<String>,
+
+    /// ID of the stored note this one corrects. The new note takes its ID, so recall no longer finds
+    /// the old text
+    #[arg(long, value_name = "ID")]
+    pub replace: Option<String>,
 }
 
 #[derive(Args)]

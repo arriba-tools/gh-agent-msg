@@ -134,7 +134,7 @@ gh agent-msg [-R OWNER/REPO] <command>
 | `watch <NAME> <CHANNEL>` | Wait for messages to a name and print them, or with `--re` for the replies to messages |
 | `open` | List the asks that wait on someone and the messages with missing replies, or `--wait` on one |
 | `log <CHANNEL>` | Print a channel's latest messages, newest first |
-| `remember <NAME> <CHANNEL>` | Store a note from a `--file` or `--text` in the channel's index, and print its ID |
+| `remember <NAME> <CHANNEL>` | Store a note from a `--file` or `--text` in the channel's index, and print its ID, or with `--replace` put it in place of a stored note |
 | `recall <CHANNEL> <QUERY>` | Print the channel's notes that best match, by meaning and by keyword |
 
 A name is a session's name, such as `coordinator` or `win2`. A channel is usually named after the
@@ -192,12 +192,16 @@ gh agent-msg -R owner/comms log my-project --count 20
 ```
 gh agent-msg -R owner/comms remember linux my-project --text "Fits cross at D 236.6"
 gh agent-msg -R owner/comms recall my-project "where do the fits cross" --count 5
+gh agent-msg -R owner/comms remember linux my-project --replace <ID> --text "Fits cross at D 236.7"
 ```
 
 Each channel is a namespace of the index. A note's ID is the milliseconds since 1970, the name that
 stored it, and the ID of the process that stored it. `recall` prints each note as a header, a blank line, then its text, best match
 first. A hybrid index ranks by meaning and by the words themselves, so an exact figure such as
 `D 236.6` still finds its note.
+
+`--replace` stores a correction under the ID of the note it corrects, so `recall` no longer finds
+the old text. It refuses an ID that names no note in the channel, rather than store a new one.
 
 ## Messages
 
