@@ -4,7 +4,6 @@ mod db;
 mod fake;
 mod message;
 mod open;
-mod vector;
 mod watch;
 
 use clap::Parser;
@@ -26,12 +25,8 @@ fn main() {
         out: &mut out,
         err: &mut err,
     };
-    let result = match &cli.command {
-        Command::Remember(_) | Command::Recall(_) => vector::connect(cli.repo.as_deref())
-            .and_then(|mut index| vector::run(&mut index, &cli, &mut io)),
-        _ => db::connect(cli.repo.as_deref())
-            .and_then(|(mut db, repo)| run(&mut db, &cli, repo.as_deref(), &mut io)),
-    };
+    let result = db::connect(cli.repo.as_deref())
+        .and_then(|(mut db, repo)| run(&mut db, &cli, repo.as_deref(), &mut io));
     let code = finish(result, &mut io);
     let _ = io.out.flush();
     std::process::exit(code);
@@ -45,7 +40,6 @@ pub fn run(db: &mut dyn Db, cli: &Cli, repo: Option<&str>, io: &mut Io) -> Resul
         Command::Watch(a) => watch::watch(db, a, repo, io),
         Command::Open(a) => open::open(db, a, io),
         Command::Log(a) => message::log(db, a, io),
-        Command::Remember(_) | Command::Recall(_) => unreachable!("these run against the index"),
     }
 }
 
@@ -67,11 +61,6 @@ pub mod tests {
     /// Run a command line against `db`, returning its exit status, output and errors.
     pub fn invoke(db: &mut dyn Db, args: &[&str]) -> (i32, String, String) {
         capture(args, |cli, io| run(db, cli, cli.repo.as_deref(), io))
-    }
-
-    /// Run a command line against `index`, as [`invoke`] does against a database.
-    pub fn invoke_index(index: &mut dyn vector::Index, args: &[&str]) -> (i32, String, String) {
-        capture(args, |cli, io| vector::run(index, cli, io))
     }
 
     fn capture(
