@@ -113,11 +113,22 @@ pub fn remember(index: &mut dyn Index, a: &RememberArgs, io: &mut Io) -> Result<
     if note.trim().is_empty() {
         return Err(Stop::Failed("The note is empty".into()));
     }
+    let channel = db::encode(&a.channel);
     let at = now_ms();
-    // The process ID keeps apart the notes one name stores in the same millisecond.
-    let id = format!("{at}-{}-{}", a.name, std::process::id());
+    let id = match &a.replace {
+        // An upsert under a stored ID overwrites that note. A missing ID would add a note instead.
+        Some(old) => {
+            let found = index.post(&format!("fetch/{channel}"), &json!({ "ids": [old] }))?;
+            if found.get(0).is_none_or(Value::is_null) {
+                return Err(Stop::Failed(format!("No note {old} in {}", a.channel)));
+            }
+            old.clone()
+        }
+        // The process ID keeps apart the notes one name stores in the same millisecond.
+        None => format!("{at}-{}-{}", a.name, std::process::id()),
+    };
     let body = json!({ "id": id, "data": note, "metadata": { "from": a.name, "at": at } });
-    index.post(&format!("upsert-data/{}", db::encode(&a.channel)), &body)?;
+    index.post(&format!("upsert-data/{channel}"), &body)?;
     say!(io.out, "{id}");
     Ok(0)
 }
@@ -160,10 +171,12 @@ mod tests {
     use super::*;
     use crate::tests::invoke_index;
 
-    /// An index that records each request and answers every one with `reply`.
+    /// An index that records each request and answers a fetch with `fetched`, every other one with
+    /// `reply`.
     struct Recorder {
         requests: Vec<(String, Value)>,
         reply: Result<Value, Stop>,
+        fetched: Value,
     }
 
     impl Recorder {
@@ -171,6 +184,7 @@ mod tests {
             Self {
                 requests: Vec::new(),
                 reply,
+                fetched: json!([null]),
             }
         }
     }
@@ -178,6 +192,9 @@ mod tests {
     impl Index for Recorder {
         fn post(&mut self, path: &str, body: &Value) -> Result<Value, Stop> {
             self.requests.push((path.to_string(), body.clone()));
+            if path.starts_with("fetch/") {
+                return Ok(self.fetched.clone());
+            }
             self.reply.clone()
         }
     }
@@ -204,6 +221,52 @@ mod tests {
         let (code, _, err) = invoke_index(&mut index, &["remember", "a", "c", "--text", " "]);
         assert_eq!((code, err.trim()), (1, "The note is empty"));
         assert!(index.requests.is_empty());
+    }
+
+    #[test]
+    fn remember_replace_overwrites_the_stored_note_under_its_id() {
+        let mut index = Recorder::answering(Ok(json!("Success")));
+        index.fetched = json!([{ "id": "1-win2-7" }]);
+        let args = [
+            "remember",
+            "mac",
+            "c",
+            "--replace",
+            "1-win2-7",
+            "--text",
+            "cross at D 236.7",
+        ];
+        let (code, out, _) = invoke_index(&mut index, &args);
+        assert_eq!(code, 0);
+        assert_eq!(
+            index.requests[0],
+            ("fetch/c".to_string(), json!({ "ids": ["1-win2-7"] }))
+        );
+        let (path, body) = &index.requests[1];
+        assert_eq!(path, "upsert-data/c");
+        assert_eq!(
+            (&body["id"], &body["data"]),
+            (&json!("1-win2-7"), &json!("cross at D 236.7"))
+        );
+        assert_eq!(body["metadata"]["from"], "mac");
+        assert_eq!(out.trim(), "1-win2-7");
+    }
+
+    #[test]
+    fn remember_replace_refuses_an_id_with_no_note() {
+        let mut index = Recorder::answering(Ok(json!("Success")));
+        let args = [
+            "remember",
+            "mac",
+            "c",
+            "--replace",
+            "1-win2-8",
+            "--text",
+            "x",
+        ];
+        let (code, _, err) = invoke_index(&mut index, &args);
+        assert_eq!((code, err.trim()), (1, "No note 1-win2-8 in c"));
+        assert_eq!(index.requests.len(), 1);
     }
 
     #[test]
