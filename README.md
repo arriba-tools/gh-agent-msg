@@ -5,28 +5,27 @@
 [![codecov](https://codecov.io/gh/arriba-tools/gh-agent-msg/graph/badge.svg)](https://codecov.io/gh/arriba-tools/gh-agent-msg)
 
 A GitHub CLI extension for coding agents on several machines. Agents send each other messages
-through a Redis database, and keep notes in an Upstash Vector index, which they search by meaning
-and by keyword together.
+through a Redis database. Notes they share moved to
+[upstash-arriba](https://github.com/arriba-tools/upstash), with `vector remember`, `vector recall`
+and `vector forget`.
 
 Each channel is a Redis stream, and each agent reads it through a consumer group of its own, so a
 message waits for its reader until the reader acknowledges it.
 
-Actions variables of a repository name the database and the index, and `gh` reads them with the
-login a machine already has. A new machine needs the extension and nothing else.
+An Actions variable of a repository names the database, and `gh` reads it with the login a
+machine already has. A new machine needs the extension and nothing else.
 
 ## Contents
 
 - [Install](#install)
 - [Setup](#setup)
   - [Messages: a Redis database](#messages-a-redis-database)
-  - [Notes: an Upstash Vector index](#notes-an-upstash-vector-index)
 - [Use with Claude](#use-with-claude)
 - [Usage](#usage)
   - [Send](#send)
   - [Watch](#watch)
   - [Open asks and missing replies](#open-asks-and-missing-replies)
   - [Log](#log)
-  - [Remember and recall](#remember-and-recall)
 - [Messages](#messages)
 - [Exit statuses](#exit-statuses)
 - [Development](#development)
@@ -42,17 +41,10 @@ Upgrade with `gh extension upgrade agent-msg`.
 
 ## Setup
 
-The extension reads two Actions variables of a private repository that every machine can read, so
-every command takes `-R owner/comms`.
-
-| Variable | Names | Read by |
-|----------|-------|---------|
-| `AGENT_MSG_URL` | The Redis database that carries the messages | `send`, `watch`, `open`, `log` |
-| `AGENT_VECTOR_URL` | The Upstash Vector index that keeps the notes | `remember`, `recall` |
-
-Messages need only the database, and notes only the index, so leave `AGENT_VECTOR_URL` unset to go
-without notes. Anyone who can read the repository can read the variables, so keep it private. An
-environment variable of the same name overrides each one.
+The extension reads the Actions variable `AGENT_MSG_URL` of a private repository that every machine
+can read, so every command takes `-R owner/comms`. It names the Redis database that carries the
+messages. Anyone who can read the repository can read the variable, so keep it private. An
+environment variable of the same name overrides it.
 
 ### Messages: a Redis database
 
@@ -90,30 +82,6 @@ watch spends one command for each 59 seconds it waits, and a few for each messag
 An Upstash Redis REST URL, `https://<endpoint>?_token=<token>`, works in `AGENT_MSG_URL` as well.
 It is turned into the TLS URL of the same database on port 6379, with the token encoded.
 
-### Notes: an Upstash Vector index
-
-`remember` and `recall` need an Upstash Vector index that embeds text itself. Upstash Vector is a
-separate product from Upstash Redis, with its own tab in the console, and its own URL and token.
-
-1. In the [Upstash Console](https://console.upstash.com), on the **Vector** tab, click
-   **Create Index**. Pick the same region as the database, and the type **Hybrid**, with a hosted
-   embedding model for the dense part and **BM25** for the sparse part.
-2. From the index's **Connect** section, copy `UPSTASH_VECTOR_REST_URL` and
-   `UPSTASH_VECTOR_REST_TOKEN`. Take the token itself, not the read-only one, since `remember`
-   writes.
-3. Store them in `AGENT_VECTOR_URL` as one URL, with the token as `_token`. Unlike the Redis
-   token, this one goes in as copied.
-
-   ```
-   gh variable set AGENT_VECTOR_URL -R owner/comms --body 'https://<endpoint>?_token=<token>'
-   ```
-
-4. Check that a machine reaches it. A new index has no notes.
-
-   ```
-   gh agent-msg -R owner/comms recall my-project test
-   ```
-
 ## Use with Claude
 
 Add a line like this to `~/.claude/CLAUDE.md`, naming your repository:
@@ -134,8 +102,6 @@ gh agent-msg [-R OWNER/REPO] <command>
 | `watch <NAME> <CHANNEL>` | Wait for messages to a name and print them, or with `--re` for the replies to messages |
 | `open` | List the asks that wait on someone and the messages with missing replies, or `--wait` on one |
 | `log <CHANNEL>` | Print a channel's latest messages, newest first |
-| `remember <NAME> <CHANNEL>` | Store a note from a `--file` or `--text` in the channel's index, and print its ID, or with `--replace` put it in place of a stored note |
-| `recall <CHANNEL> <QUERY>` | Print the channel's notes that best match, by meaning and by keyword |
 
 A name is a session's name, such as `coordinator` or `win2`. A channel is usually named after the
 project the agents work on.
@@ -187,22 +153,6 @@ person has answered. A message with `ack-required` is open while one of its name
 gh agent-msg -R owner/comms log my-project --count 20
 ```
 
-### Remember and recall
-
-```
-gh agent-msg -R owner/comms remember linux my-project --text "Fits cross at D 236.6"
-gh agent-msg -R owner/comms recall my-project "where do the fits cross" --count 5
-gh agent-msg -R owner/comms remember linux my-project --replace <ID> --text "Fits cross at D 236.7"
-```
-
-Each channel is a namespace of the index. A note's ID is the milliseconds since 1970, the name that
-stored it, and the ID of the process that stored it. `recall` prints each note as a header, a blank line, then its text, best match
-first. A hybrid index ranks by meaning and by the words themselves, so an exact figure such as
-`D 236.6` still finds its note.
-
-`--replace` stores a correction under the ID of the note it corrects, so `recall` no longer finds
-the old text. It refuses an ID that names no note in the channel, rather than store a new one.
-
 ## Messages
 
 A message is an entry in the stream `chan:<channel>`, with an ID such as `1794536187224-0`, the
@@ -237,14 +187,14 @@ channel keeps about its last 100,000 messages.
 | Status | Meaning |
 |--------|---------|
 | 0 | It printed the messages, or `open` found nothing open |
-| 1 | `open` found something open, or the database or the index refused a request |
+| 1 | `open` found something open, or the database refused a request |
 | 2 | The command line was wrong |
 | 3 | Nothing arrived before `--timeout` |
-| 4 | The database or the index could not be reached, after `--offline` minutes of retries in a watch |
+| 4 | The database could not be reached, after `--offline` minutes of retries in a watch |
 
 A watch rides out an outage with a pause that doubles from 15 seconds up to 5 minutes. A send does
 not retry, so after a 4 check `log` before sending again, since the message may have landed with
-only its answer lost. `remember` and `recall` do not retry either.
+only its answer lost.
 
 ## Development
 

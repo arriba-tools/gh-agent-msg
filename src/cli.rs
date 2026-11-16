@@ -14,8 +14,7 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
 
-    /// Repository whose Actions variables AGENT_MSG_URL and AGENT_VECTOR_URL name the database and
-    /// the index (default: current repo)
+    /// Repository whose Actions variable AGENT_MSG_URL names the database (default: current repo)
     #[arg(short = 'R', long, global = true, value_name = "OWNER/REPO")]
     pub repo: Option<String>,
 }
@@ -39,13 +38,6 @@ pub enum Command {
     Open(OpenArgs),
     /// Print a channel's latest messages, newest first
     Log(LogArgs),
-    /// Store a note in a channel's index, where recall finds it by meaning or by its words
-    ///
-    /// The index is the Upstash Vector index that the variable AGENT_VECTOR_URL names, and the
-    /// channel is its namespace.
-    Remember(RememberArgs),
-    /// Search a channel's notes by meaning and by keyword together, best match first
-    Recall(RecallArgs),
 }
 
 #[derive(Args)]
@@ -135,44 +127,6 @@ pub struct OpenArgs {
     /// Minutes --wait waits before giving up
     #[arg(long, value_name = "MINS", default_value_t = 110)]
     pub timeout: u64,
-}
-
-#[derive(Args)]
-#[command(group(ArgGroup::new("note_source").required(true).args(["file", "text"])))]
-pub struct RememberArgs {
-    /// Your name
-    pub name: String,
-
-    /// Channel whose index keeps the note
-    pub channel: String,
-
-    /// UTF-8 file holding the note
-    #[arg(long, value_name = "PATH")]
-    pub file: Option<PathBuf>,
-
-    /// The note itself
-    #[arg(long)]
-    pub text: Option<String>,
-
-    /// ID of the stored note this one corrects. The new note takes its ID, so recall no longer finds
-    /// the old text
-    #[arg(long, value_name = "ID")]
-    pub replace: Option<String>,
-}
-
-#[derive(Args)]
-pub struct RecallArgs {
-    /// Channel whose notes to search
-    pub channel: String,
-
-    /// What to look for, in words, which may start with a dash, as a flag's name does
-    #[arg(allow_hyphen_values = true)]
-    pub query: String,
-
-    /// How many notes
-    #[arg(long, value_name = "N", default_value_t = 5,
-          value_parser = clap::value_parser!(u64).range(1..=1000))]
-    pub count: u64,
 }
 
 #[derive(Args)]
